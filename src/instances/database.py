@@ -20,7 +20,8 @@ settings = get_settings()
 connect_args = {}
 if "postgresql" in settings.database_url:
     # Enforce SSL and set search_path to public schema for PostgreSQL
-    connect_args["ssl"] = "require"
+    if settings.database_ssl:
+        connect_args["ssl"] = "require"
     connect_args["server_settings"] = {"search_path": "public"}
 
 engine_args = {

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────
     database_url: str
+    # Disable for a Postgres container reached over the private Docker network
+    database_ssl: bool = True
 
     # ── Gemini ────────────────────────────────────────────────────────────
     gemini_api_key: str
