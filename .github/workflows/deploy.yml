@@ -148,23 +148,6 @@ jobs:
                   retries: 5
                 restart: unless-stopped
             
-              db-backup:
-                image: postgres:17
-                environment:
-                  PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-                volumes:
-                  - ./backups:/backups
-                depends_on:
-                  db:
-                    condition: service_healthy
-                # Daily dump at container start + every 24h; keep the last 14
-                entrypoint: >
-                  sh -c 'while true; do
-                  pg_dump -h db -U pocketcfo -d pocketcfo -Fc -f /backups/pocketcfo-$$(date +%Y%m%d-%H%M).dump &&
-                  ls -1t /backups/pocketcfo-*.dump | tail -n +15 | xargs -r rm -f;
-                  sleep 86400; done'
-                restart: unless-stopped
-            
               frontend:
                 image: ghcr.io/chiehhuiwei/pocketcfo-frontend:latest
                 ports:
@@ -182,7 +165,7 @@ jobs:
             
             # Pull and restart containers using production compose
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
             
             # Clean up old unused images and stopped containers to free VM disk space
             docker system prune -f
