@@ -4,7 +4,9 @@ Uses Gemini to extract structured data from bank statement PDFs.
 """
 from __future__ import annotations
 
+import csv
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -194,35 +196,49 @@ async def parse_einvoice_statement(pdf_path: Path) -> dict[str, Any]:
     return await extract_structured(pdf_path, EINVOICE_PROMPT)
 
 
+_EINVOICE_COLUMNS = [
+    "載具自訂名稱", "發票日期", "發票號碼", "發票金額", "發票狀態", "折讓", "賣方統一編號", "賣方名稱",
+    "賣方地址", "買方統編", "消費明細_數量", "消費明細_單價", "消費明細_金額", "消費明細_品名",
+]
+_NUMBER_RE = re.compile(r"^-?\d+(\.\d+)?$")
+_BUYER_ID_RE = re.compile(r"^(\d{8})?$")
+
+
+def _split_einvoice_row(parts: list[str]) -> list[str] | None:
+    """
+    Map one carrier-CSV row onto _EINVOICE_COLUMNS. The export doesn't quote fields, so commas inside
+    the seller address or item name shift later columns; anchor on the quantity/unit price/amount
+    numbers (preceded by an empty or 8-digit buyer tax ID) instead of fixed positions.
+    """
+    fields = [p.strip() for p in parts]
+    if len(fields) < 14 or not fields[2]:  # blank padding rows have no invoice number
+        return None
+    for i in range(9, len(fields) - 2):
+        if _BUYER_ID_RE.match(fields[i - 1]) and all(_NUMBER_RE.match(fields[j]) for j in (i, i + 1, i + 2)):
+            # Re-join split fields from the raw parts so spacing after embedded commas is kept
+            address = ",".join(parts[8:i - 1]).strip()
+            product_name = ",".join(parts[i + 3:]).rstrip(", ").strip()
+            return fields[:8] + [address, fields[i - 1], fields[i], fields[i + 1], fields[i + 2], product_name]
+    return None
+
+
 async def parse_einvoice_csv(csv_path: Path) -> dict[str, Any]:
     """Parse an electronic invoice carrier CSV file and return aggregated structured data."""
     import pandas as pd
     from datetime import datetime
 
     rows = []
-    header = None
-    with open(csv_path, 'r', encoding='utf-8') as f:
-        # Read the header
-        header_line = f.readline().strip()
-        if header_line.startswith('\ufeff'):
-            header_line = header_line[1:]
-        header = header_line.split(',')
-        
-        for line in f:
-            line = line.strip()
-            if not line:
+    with open(csv_path, 'r', encoding='utf-8-sig', newline='') as f:
+        reader = csv.reader(f)
+        next(reader, None)  # header; column count varies between exports (trailing empty columns)
+        for parts in reader:
+            if any("注意" in p or "捐贈" in p or "字軌" in p for p in parts):
                 continue
-            if "注意" in line or "捐贈" in line or "字軌" in line:
-                continue
-            parts = line.split(',')
-            if len(parts) < 14:
-                continue
-            row = parts[:13]
-            product_name = ",".join(parts[13:])
-            row.append(product_name)
-            rows.append(row)
-            
-    df = pd.DataFrame(rows, columns=header)
+            row = _split_einvoice_row(parts)
+            if row:
+                rows.append(row)
+
+    df = pd.DataFrame(rows, columns=_EINVOICE_COLUMNS)
     df['發票日期'] = df['發票日期'].astype(str)
     df['發票金額'] = pd.to_numeric(df['發票金額'], errors='coerce').fillna(0)
     
