@@ -1029,6 +1029,13 @@ class StatementService:
         elif kind == "credit_card":
             data = await parse_credit_card_statement(pdf_path)
             data["kind"] = "credit_card"
+            # Screenshots of the transaction list often lack the billed total; estimate it from the items
+            if data.get("total_amount") is None:
+                data["total_amount"] = round(sum(
+                    -abs(float(i.get("amount") or 0)) if i.get("is_refund") else abs(float(i.get("amount") or 0))
+                    for i in data.get("items", [])
+                ), 2)
+                data["total_amount_computed"] = True
         elif kind == "brokerage":
             is_firstrade = "firstrade" in filename.lower()
             if is_firstrade:

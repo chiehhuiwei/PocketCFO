@@ -78,7 +78,7 @@ Return ONLY valid JSON with this exact schema:
   "card_last_four": "string",
   "period_year": integer,
   "period_month": integer,
-  "total_amount": float,
+  "total_amount": float or null,
   "payment_due_date": "YYYY-MM-DD or null",
   "currency": "TWD",
   "items": [
@@ -95,7 +95,7 @@ Return ONLY valid JSON with this exact schema:
 
 Important:
 - ALL dates MUST be formatted as YYYY-MM-DD in the Gregorian calendar (西元年). If the statement uses the Taiwan ROC calendar (民國), convert it by adding 1911 to the year.
-- total_amount is the total billed amount for this cycle
+- total_amount is the total billed amount for this cycle (本期應繳總額) as printed on the statement. If the document does not show it (e.g. screenshots of the transaction list only), return null — do NOT add up the items or guess.
 - period_year and period_month MUST represent the month the transactions actually took place in (the statement cycle month), NOT the statement issue date or billing date. For example, a bill due in June for May's consumption should have period_month = 5.
 - Refunds / 退款 should have is_refund: true and positive amount
 - Categorize merchants as best as you can

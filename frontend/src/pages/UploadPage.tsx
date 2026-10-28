@@ -210,6 +210,7 @@ export default function UploadPage() {
         card_last_four: rawData.card_last_four || "",
         closing_balance: rawData.closing_balance != null ? rawData.closing_balance : 0,
         total_amount: rawData.total_amount != null ? rawData.total_amount : 0,
+        total_amount_computed: !!rawData.total_amount_computed,
         payment_due_date: rawData.payment_due_date || "",
         cash_balance: rawData.cash_balance != null ? rawData.cash_balance : 0,
         total_market_value: rawData.total_market_value != null ? rawData.total_market_value : 0,
@@ -752,6 +753,11 @@ export default function UploadPage() {
                         onChange={e => updateField("total_amount", parseFloat(e.target.value) || 0)}
                         className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-semibold focus:outline-none focus:border-blue-500"
                       />
+                      {editData.total_amount_computed && (
+                        <p className="mt-1 text-[10px] text-amber-600">
+                          對帳單上沒有帳單總額，此金額由明細加總（消費扣掉退款）算出，不含前期未繳、分期或繳款，請確認
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">繳款截止日 (YYYY-MM-DD)</label>
