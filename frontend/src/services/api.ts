@@ -357,13 +357,14 @@ export async function getSecuritiesHistory() {
 }
 
 export async function parseStatement(
-  file: File,
+  file: File | File[],
   kind: StatementKind,
   accountCode?: string,
   password?: string
 ) {
   const form = new FormData();
-  form.append("file", file);
+  // Several screenshots of one statement are sent together and stitched in order by the backend
+  for (const f of Array.isArray(file) ? file : [file]) form.append("file", f);
   form.append("kind", kind);
   if (accountCode) form.append("account_code", accountCode);
   if (password) form.append("password", password);

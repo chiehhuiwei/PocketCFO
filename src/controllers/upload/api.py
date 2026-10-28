@@ -23,6 +23,7 @@ from src.controllers.upload.model import StatementKind, ConfirmStatementRequest
 from src.services.statement.service import StatementService
 from src.services.reports.income_statement import IncomeStatementService
 from src.services.reports.balance_sheet import BalanceSheetService
+from src.utils.image_utils import stitch_images_vertically
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ settings = get_settings()
 
 @router.post("/parse")
 async def upload_and_parse_statement(
-    file: Annotated[UploadFile, File(description="PDF statement")],
+    file: Annotated[list[UploadFile], File(description="PDF statement, or one or more screenshots of one statement")],
     kind: Annotated[StatementKind, Form(description="bank | credit_card | brokerage | einvoice")],
     account_code: Annotated[str | None, Form()] = None,
     password: Annotated[str | None, Form(description="Password to decrypt PDF if encrypted")] = None,
@@ -41,27 +42,48 @@ async def upload_and_parse_statement(
 ):
     """
     Parse a PDF statement using Gemini, returning the JSON structure without writing to the database.
+    Several screenshots of the same statement can be uploaded at once; they are stitched in order.
     """
     history_repo = UploadHistoryRepository(db, current_user.id)
 
     image_exts = (".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif")
     valid_exts = (".pdf", ".csv") + image_exts if kind == "einvoice" else (".pdf",) + image_exts
-    if not file.filename or not file.filename.lower().endswith(valid_exts):
-        raise HTTPException(status_code=400, detail=f"Only {', '.join(valid_exts)} files are accepted")
+    for upload in file:
+        if not upload.filename or not upload.filename.lower().endswith(valid_exts):
+            raise HTTPException(status_code=400, detail=f"Only {', '.join(valid_exts)} files are accepted")
 
-    contents = await file.read()
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
-    if len(contents) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_size_mb} MB)")
+    if len(file) > 1:
+        names = [upload.filename.lower() for upload in file]
+        if not all(n.endswith(image_exts) for n in names):
+            raise HTTPException(status_code=400, detail="一次上傳多個檔案僅支援圖片（同一份對帳單的截圖）")
+        if any(n.endswith((".heic", ".heif")) for n in names):
+            raise HTTPException(status_code=400, detail="多張上傳暫不支援 HEIC，請改用 PNG / JPG 截圖")
+        images = [await upload.read() for upload in file]
+        if sum(len(b) for b in images) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"Files too large (max {settings.max_upload_size_mb} MB in total)")
+        # Same screenshots in the same order -> same hash, so re-uploads are still caught as duplicates
+        file_hash = hashlib.sha256(b"".join(hashlib.sha256(b).digest() for b in images)).hexdigest()
+        try:
+            contents = stitch_images_vertically(images)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"無法讀取圖片：{exc}")
+        filename = f"{file[0].filename} 等 {len(file)} 張"[:255]
+        suffix = ".png"
+    else:
+        contents = await file[0].read()
+        if len(contents) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_size_mb} MB)")
+        file_hash = hashlib.sha256(contents).hexdigest()
+        filename = file[0].filename
+        suffix = Path(filename).suffix.lower()
 
-    file_hash = hashlib.sha256(contents).hexdigest()
     existing = await history_repo.get_by_hash(file_hash)
     if existing:
         raise HTTPException(status_code=409, detail="這份檔案已經上傳過囉！ (Duplicate File)")
 
     upload_dir = Path(settings.upload_dir) / "statements"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename).suffix.lower()
     tmp_path = upload_dir / f"{uuid.uuid4()}{suffix}"
 
     async with aiofiles.open(tmp_path, "wb") as f:
@@ -93,12 +115,12 @@ async def upload_and_parse_statement(
 
     try:
         service = StatementService(db, current_user.id)
-        parsed_data = await service.parse_statement(tmp_path, kind, file.filename)
+        parsed_data = await service.parse_statement(tmp_path, kind, filename)
         if account_code:
             parsed_data["account_code"] = account_code
         return {
             "status": "ok",
-            "filename": file.filename,
+            "filename": filename,
             "file_hash": file_hash,
             "parsed_data": parsed_data
         }

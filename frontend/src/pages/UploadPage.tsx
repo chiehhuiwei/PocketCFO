@@ -19,6 +19,12 @@ const KINDS = [
   { id: "einvoice", num: 4, title: "電子發票載具清單", sub: "請上傳您的電子發票清單", ext: "PDF、CSV 或 圖片檔案" },
 ];
 
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"];
+
+function isImageFile(f: File): boolean {
+  return IMAGE_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext));
+}
+
 export default function UploadPage() {
   const [files, setFiles] = useState<Record<string, File[]>>({
     bank: [],
@@ -88,6 +94,11 @@ export default function UploadPage() {
     if (e.target.files && e.target.files.length > 0) {
       setFiles({ ...files, [kindId]: [...files[kindId], ...Array.from(e.target.files)] });
     }
+    e.target.value = ""; // allow re-selecting the same file after removing it
+  };
+
+  const handleFileRemove = (kindId: string, index: number) => {
+    setFiles({ ...files, [kindId]: files[kindId].filter((_, i) => i !== index) });
   };
 
   const uploadedCount = Object.values(files).reduce((acc, curr) => acc + curr.length, 0);
@@ -103,22 +114,25 @@ export default function UploadPage() {
 
     try {
       let activeKind: StatementKind | null = null;
-      let activeFile: File | null = null;
+      let activeFiles: File[] = [];
 
-      // Find the first file selected
+      // Use the first statement type that has files selected
       for (const [kind, fileList] of Object.entries(files)) {
         if (fileList.length > 0) {
           activeKind = kind as StatementKind;
-          activeFile = fileList[0];
+          activeFiles = fileList;
           break;
         }
       }
 
-      if (!activeFile || !activeKind) {
+      if (activeFiles.length === 0 || !activeKind) {
         throw new Error("請先選擇對帳單檔案");
       }
+      if (activeFiles.length > 1 && !activeFiles.every(isImageFile)) {
+        throw new Error("一次選多個檔案時僅支援圖片（同一份對帳單的截圖）；PDF 請一次上傳一份");
+      }
 
-      const res = await parseStatement(activeFile, activeKind, undefined, password);
+      const res = await parseStatement(activeFiles, activeKind, undefined, password);
 
       clearTimeout(t1);
       clearTimeout(t2);
@@ -383,6 +397,26 @@ export default function UploadPage() {
                 <div className="inline-block px-2 py-1 bg-red-50 text-red-600 text-[10px] font-bold rounded">
                   {k.ext}
                 </div>
+                {files[k.id].length > 0 && (
+                  <ol className="mt-2 space-y-1 text-[11px] text-slate-600">
+                    {files[k.id].map((f, i) => (
+                      <li key={`${f.name}-${i}`} className="flex items-center gap-1.5">
+                        <span className="text-slate-400 w-4 text-right">{i + 1}.</span>
+                        <span className="truncate max-w-[220px]">{f.name}</span>
+                        <button
+                          onClick={() => handleFileRemove(k.id, i)}
+                          className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                          aria-label={`移除 ${f.name}`}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {files[k.id].length > 1 && (
+                  <p className="mt-1 text-[10px] text-slate-400">多張截圖會依上面的順序接成一份對帳單解析</p>
+                )}
               </div>
               <div 
                 className={`w-[140px] border border-dashed rounded-lg flex flex-col items-center justify-center text-xs p-2 transition-colors cursor-pointer ${files[k.id].length > 0 ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:bg-slate-50'}`}
@@ -403,6 +437,7 @@ export default function UploadPage() {
                       ? ".pdf,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif" 
                       : ".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif"
                   } 
+                  multiple
                   onChange={(e) => handleFileSelect(e, k.id)} 
                 />
               </div>
