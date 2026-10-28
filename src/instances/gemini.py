@@ -27,7 +27,7 @@ def get_gemini_client() -> genai.Client:
 
 
 _SLICE_ASPECT = 1.4  # slice height / width
-_SLICE_OVERLAP_RATIO = 0.04
+_SLICE_OVERLAP_RATIO = 0.08
 
 
 def _slice_tall_image(file_bytes: bytes) -> list[bytes] | None:
@@ -103,8 +103,10 @@ async def extract_from_pdf(pdf_path: Path, prompt: str) -> str:
         contents = [types.Part.from_bytes(data=b, mime_type="image/png") for b in image_slices]
         contents.append(
             f"The {len(image_slices)} images above are consecutive vertical slices (top to bottom) of ONE long "
-            "statement screenshot. Adjacent slices overlap slightly, so a row cut at a slice edge may appear twice — "
-            "include each transaction only once (use the running balance to tell duplicates apart)."
+            "statement image. Each slice repeats a thin strip from the bottom of the previous slice, so the first "
+            "row(s) at the TOP of a slice may duplicate the LAST row(s) at the BOTTOM of the previous slice — count "
+            "such boundary rows once. Rows that look identical but are inside the same slice (or are not at a slice "
+            "boundary) are separate transactions and MUST all be kept."
         )
     else:
         contents = [
@@ -141,6 +143,12 @@ async def extract_from_pdf(pdf_path: Path, prompt: str) -> str:
         if extracted_text.strip():
             contents.append(f"Here is the locally extracted text content of the PDF statement to ensure 100% data and numerical accuracy:\n\n{extracted_text}")
 
+    from datetime import date
+    contents.append(
+        f"Today's date is {date.today().isoformat()}. If transaction dates omit the year (e.g. `08/26`), take the "
+        "year from the statement period shown in the document; if no year is shown anywhere, use the most recent "
+        "year that does not put the date in the future."
+    )
     contents.append(prompt)
 
     response = await client.aio.models.generate_content(
